@@ -512,8 +512,41 @@ class CommandInterface:
         print(move)
         return True
 
+
+
+
+    def run_simulation(self, game: HeapGo) -> str:
+        """Run one random playout without changing the supplied game."""
+        simulation = game.copy()
+
+        while not simulation.game_over():
+            moves = simulation.legal_moves()
+            move = random.choice(moves)
+            simulation.play(move)
+
+        winner = simulation.winner()
+        assert winner is not None
+        return winner
+
+
+    def count_simulation_wins(self, game: HeapGo, player: str, num_simulations: int) -> int:
+        """Count wins for player across n independent simulations."""
+        wins = 0
+
+        for _ in range(num_simulations):
+            if self.run_simulation(game) == player:
+                wins += 1
+
+        return wins
+
+
     def cmd_simulate(self, args: str) -> bool:
-        return not_yet()
+        if self.game is None:
+            print_error("no game started")
+            return False
+
+        print(self.run_simulation(self.game))
+        return True
 
     def cmd_numsimulations(self, args: str) -> bool:
         return not_yet()
