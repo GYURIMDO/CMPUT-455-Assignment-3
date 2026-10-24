@@ -541,7 +541,12 @@ class CommandInterface:
 
 
     def cmd_simulate(self, args: str) -> bool:
-        return not_yet()
+        if self.game is None:
+            print_error("no game started")
+            return False
+
+        print(self.run_simulation(self.game))
+        return True
 
     def cmd_numsimulations(self, args: str) -> bool:
         return not_yet()
