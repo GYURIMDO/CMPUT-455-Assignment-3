@@ -377,6 +377,7 @@ class CommandInterface:
         self.solver = Solver()  # A2
         self.timelimit = DEFAULT_TIMELIMIT  # A2
         # you can add your own initialisation here
+        self.policy = "random"
         self.commands: CommandMap = {
             "help": self.cmd_help,
             "heapgo": self.cmd_heapgo,
@@ -552,10 +553,113 @@ class CommandInterface:
         return not_yet()
 
     def cmd_policy(self, args: str) -> bool:
-        return not_yet()
+        if args == "random" or args == "probabilistic":
+            self.policy = args
+            return True
 
+        return False
+    
+    def move_weight(self, game: HeapGo, move: int) -> int:
+        heap = game.heaps[move]
+        weight = 0
+
+        for token in reversed(heap):
+            color = token[0]
+            value = token[1]
+
+            weight = weight + value
+
+            if color != game.toplay:
+                break
+
+        return weight
+
+    def move_probabilities(self, game: HeapGo) -> Dict[int, float]:
+        moves = game.legal_moves()
+        probabilities = {}
+
+        if len(moves) == 0:
+            return probabilities
+
+        if self.policy == "random":
+            for move in moves:
+                probabilities[move] = 1 / len(moves)
+
+        else:
+            weights = {}
+            total = 0
+
+            for move in moves:
+                weight = self.move_weight(game, move)
+                weights[move] = weight
+                total = total + weight
+
+            for move in moves:
+                probabilities[move] = weights[move] / total
+
+        return probabilities
+    
     def cmd_policymoves(self, args: str) -> bool:
-        return not_yet()
+        if self.game is None:
+            return False
+
+        moves = self.game.legal_moves()
+
+        if len(moves) == 0:
+            return True
+
+        weights = []
+
+        for move in moves:
+            if self.policy == "random":
+                weight = 1
+
+            else:
+                heap = self.game.heaps[move]
+                weight = 0
+
+                for token in reversed(heap):
+                    weight = weight + token[1]
+
+                    if token[0] != self.game.toplay:
+                        break
+
+            weights.append(weight)
+
+        total = sum(weights)
+        result = []
+
+        for i in range(len(moves)):
+            probability = weights[i] / total
+            result.append(f"{moves[i]} {probability:.3f}")
+
+        print(" ".join(result))
+        return True
+            
+    def choose_policy_move(self, game):
+        moves = game.legal_moves()
+
+        if self.policy == "random":
+            return random.choice(moves)
+
+        weights = []
+
+        for move in moves:
+            heap = game.heaps[move]
+            weight = 0
+
+            for token in reversed(heap):
+                weight = weight + token[1]
+
+                if token[0] != game.toplay:
+                    break
+
+            weights.append(weight)
+
+        move = random.choices(moves, weights=weights, k=1)[0]
+
+        return move
+        
 #============================================================================
 # End of functions requiring implementation
 #============================================================================
