@@ -533,28 +533,42 @@ class CommandInterface:
         return True
 
 
-
-
     def run_simulation(self, game: HeapGo) -> str:
-        """Run one random playout without changing the supplied game."""
-        simulation = game.copy()
-        # only the heap just played can become empty, so keep the list of
-        # legal moves up to date instead of scanning all heaps every move
-        moves = simulation.legal_moves()
+        """
+        Runs a simulation of the game from current state and returns a winner
+        """
+        sizes = [len(heap) for heap in game.heaps]
+        moves = [heap_number for heap_number, size in enumerate(sizes) if size]
+        toplay = COLORS.index(game.toplay)
+        scores = [game.score[BLACK], game.score[WHITE]]
 
         while moves:
-            move = self.choose_policy_move(simulation, moves)
-            simulation.play_move(move)
-            if not simulation.heaps[move]:
+            gain, take = self.solver.gain[toplay], self.solver.take[toplay]
+            move = self.choose_playout_move(moves, sizes, gain)
+            size = sizes[move]
+            scores[toplay] += gain[move][size]
+            sizes[move] = size - take[move][size]
+            # Only the heap just played can become empty
+            if sizes[move] == 0:
                 moves.remove(move)
+            toplay = 1 - toplay
 
-        winner = simulation.winner()
-        assert winner is not None
-        return winner
+        return BLACK if scores[0] > scores[1] else WHITE  # no draws with komi = integer + 0.5
+
+    def choose_playout_move(self, moves: List[int], sizes: List[int], gain: List[List[int]]) -> int:
+        """
+        Helper function to choose a move during simulation
+        """
+        if self.policy == "random":
+            return random.choice(moves)
+
+        weights = [gain[move][sizes[move]] for move in moves]
+        return random.choices(moves, weights=weights, k=1)[0]
 
 
     def count_simulation_wins(self, game: HeapGo, player: str, num_simulations: int) -> int:
         """Count wins for player across n independent simulations."""
+        self.solver.prepare(game)
         wins = 0
 
         for _ in range(num_simulations):
@@ -569,6 +583,7 @@ class CommandInterface:
             print_error("no game started")
             return False
 
+        self.solver.prepare(self.game)
         print(self.run_simulation(self.game))
         return True
 
@@ -698,24 +713,29 @@ class CommandInterface:
         print(" ".join(result))
         return True
             
-    def choose_policy_move(self, game, moves):
+    def choose_policy_move(self, game):
+        moves = game.legal_moves()
+
         if self.policy == "random":
             return random.choice(moves)
 
         weights = []
-
+        # Calculate the weight for each move based on the policy
         for move in moves:
             heap = game.heaps[move]
             weight = 0
 
+            # Calculate the weight of the move based on the tokens in the heap
             for token in reversed(heap):
                 weight = weight + token[1]
 
+                # Only consider tokens of the current player's color for weight calculation
                 if token[0] != game.toplay:
                     break
 
             weights.append(weight)
-
+            
+        # Select a move based on the calculated weights
         move = random.choices(moves, weights=weights, k=1)[0]
 
         return move
