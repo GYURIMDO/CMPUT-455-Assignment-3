@@ -53,6 +53,9 @@ TT_SHIFT = 64 - TT_BITS
 # A2: end of solver constants
 # ---------------------------------------------------------------------------
 
+MIN_SIMULATIONS = 1
+MAX_SIMULATIONS = 100
+DEFAULT_SIMULATIONS = 10
 
 def not_yet() -> bool:
     raise NotImplementedError("Command not implemented.")
@@ -138,6 +141,23 @@ def parse_timelimit(args: str) -> Optional[int]:
     if not (MIN_TIMELIMIT <= seconds <= MAX_TIMELIMIT):
         return None
     return seconds
+
+def parse_numsimulations(args: str) -> Optional[int]:
+    parts = args.split()
+    
+    if len(parts) != 1:
+        return None
+    
+    try:
+        num_simulations = int(parts[0])
+    except ValueError:
+        return None
+    
+    # Check if the number of simulations is within the allowed range
+    if not (MIN_SIMULATIONS <= num_simulations <= MAX_SIMULATIONS):
+        return None
+    
+    return num_simulations
 
 # ---------------------------------------------------------------------------
 # Game
@@ -377,6 +397,8 @@ class CommandInterface:
         self.solver = Solver()  # A2
         self.timelimit = DEFAULT_TIMELIMIT  # A2
         # you can add your own initialisation here
+        self.policy = "random"
+        self.num_simulations = DEFAULT_SIMULATIONS  # A3 simulation constraint counter
         self.commands: CommandMap = {
             "help": self.cmd_help,
             "heapgo": self.cmd_heapgo,
@@ -505,9 +527,7 @@ class CommandInterface:
         if not moves:
             print_error("no legal moves")
             return False
-        # you need to replace this random move by a move from your
-        # simulation-based player
-        move = random.choice(moves)
+        move = self.choose_simulation_move(self.game, moves)
         self.game.play(move)
         print(move)
         return True
@@ -518,11 +538,15 @@ class CommandInterface:
     def run_simulation(self, game: HeapGo) -> str:
         """Run one random playout without changing the supplied game."""
         simulation = game.copy()
+        # only the heap just played can become empty, so keep the list of
+        # legal moves up to date instead of scanning all heaps every move
+        moves = simulation.legal_moves()
 
-        while not simulation.game_over():
-            moves = simulation.legal_moves()
-            move = random.choice(moves)
-            simulation.play(move)
+        while moves:
+            move = self.choose_policy_move(simulation, moves)
+            simulation.play_move(move)
+            if not simulation.heaps[move]:
+                moves.remove(move)
 
         winner = simulation.winner()
         assert winner is not None
@@ -549,13 +573,153 @@ class CommandInterface:
         return True
 
     def cmd_numsimulations(self, args: str) -> bool:
-        return not_yet()
+        num_simulations = parse_numsimulations(args)
+        if num_simulations is None:
+            print_error("invalid number of simulations: {}".format(args))
+            return False
+        self.num_simulations = num_simulations
+        return True
+
+    def evaluate_move(self, game: HeapGo, move: int) -> float:
+        """
+        Evaluates a move by simulating it and then counting the # wins required for specified number of simulations
+        Win rate for the player to move is calculated
+        """
+        player = game.toplay
+        taken, gained = game.play_move(move)
+        # Count the number of wins for player to move after simulating the game for the specified number of simulations
+        wins = self.count_simulation_wins(game, player, self.num_simulations)
+        game.undo_move(move, taken, gained)
+
+        return wins / self.num_simulations
+
+    def choose_simulation_move(self, game: HeapGo, moves: List[int]) -> int:
+        """
+        Flat Monte Carlo implementation that plays the move with the highest simulated # of wins
+        Tie breaker is randomised
+        """
+        best_win_rate = -1.0
+        best_moves: List[int] = []
+
+        # Evaluate each move and keep track of the move with the best win rate
+        for move in moves:
+            win_rate = self.evaluate_move(game, move)
+
+            # Update the best win rate and best moves list based on the current move's win rate
+            if win_rate > best_win_rate:
+                best_win_rate = win_rate
+                best_moves = [move]
+            elif win_rate == best_win_rate:
+                best_moves.append(move)
+
+        return random.choice(best_moves)
 
     def cmd_policy(self, args: str) -> bool:
-        return not_yet()
+        if args == "random" or args == "probabilistic":
+            self.policy = args
+            return True
 
+        return False
+    
+    def move_weight(self, game: HeapGo, move: int) -> int:
+        heap = game.heaps[move]
+        weight = 0
+
+        for token in reversed(heap):
+            color = token[0]
+            value = token[1]
+
+            weight = weight + value
+
+            if color != game.toplay:
+                break
+
+        return weight
+
+    def move_probabilities(self, game: HeapGo) -> Dict[int, float]:
+        moves = game.legal_moves()
+        probabilities = {}
+
+        if len(moves) == 0:
+            return probabilities
+
+        if self.policy == "random":
+            for move in moves:
+                probabilities[move] = 1 / len(moves)
+
+        else:
+            weights = {}
+            total = 0
+
+            for move in moves:
+                weight = self.move_weight(game, move)
+                weights[move] = weight
+                total = total + weight
+
+            for move in moves:
+                probabilities[move] = weights[move] / total
+
+        return probabilities
+    
     def cmd_policymoves(self, args: str) -> bool:
-        return not_yet()
+        if self.game is None:
+            return False
+
+        moves = self.game.legal_moves()
+
+        if len(moves) == 0:
+            return True
+
+        weights = []
+
+        for move in moves:
+            if self.policy == "random":
+                weight = 1
+
+            else:
+                heap = self.game.heaps[move]
+                weight = 0
+
+                for token in reversed(heap):
+                    weight = weight + token[1]
+
+                    if token[0] != self.game.toplay:
+                        break
+
+            weights.append(weight)
+
+        total = sum(weights)
+        result = []
+
+        for i in range(len(moves)):
+            probability = weights[i] / total
+            result.append(f"{moves[i]} {probability:.3f}")
+
+        print(" ".join(result))
+        return True
+            
+    def choose_policy_move(self, game, moves):
+        if self.policy == "random":
+            return random.choice(moves)
+
+        weights = []
+
+        for move in moves:
+            heap = game.heaps[move]
+            weight = 0
+
+            for token in reversed(heap):
+                weight = weight + token[1]
+
+                if token[0] != game.toplay:
+                    break
+
+            weights.append(weight)
+
+        move = random.choices(moves, weights=weights, k=1)[0]
+
+        return move
+        
 #============================================================================
 # End of functions requiring implementation
 #============================================================================
