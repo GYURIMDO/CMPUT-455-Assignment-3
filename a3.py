@@ -53,6 +53,9 @@ TT_SHIFT = 64 - TT_BITS
 # A2: end of solver constants
 # ---------------------------------------------------------------------------
 
+MIN_SIMULATIONS = 1
+MAX_SIMULATIONS = 100
+DEFAULT_SIMULATIONS = 10
 
 def not_yet() -> bool:
     raise NotImplementedError("Command not implemented.")
@@ -138,6 +141,23 @@ def parse_timelimit(args: str) -> Optional[int]:
     if not (MIN_TIMELIMIT <= seconds <= MAX_TIMELIMIT):
         return None
     return seconds
+
+def parse_numsimulations(args: str) -> Optional[int]:
+    parts = args.split()
+    
+    if len(parts) != 1:
+        return None
+    
+    try:
+        num_simulations = int(parts[0])
+    except ValueError:
+        return None
+    
+    # Check if the number of simulations is within the allowed range
+    if not (MIN_SIMULATIONS <= num_simulations <= MAX_SIMULATIONS):
+        return None
+    
+    return num_simulations
 
 # ---------------------------------------------------------------------------
 # Game
@@ -378,6 +398,7 @@ class CommandInterface:
         self.timelimit = DEFAULT_TIMELIMIT  # A2
         # you can add your own initialisation here
         self.policy = "random"
+        self.num_simulations = DEFAULT_SIMULATIONS  # A3 simulation constraint counter
         self.commands: CommandMap = {
             "help": self.cmd_help,
             "heapgo": self.cmd_heapgo,
@@ -506,9 +527,7 @@ class CommandInterface:
         if not moves:
             print_error("no legal moves")
             return False
-        # you need to replace this random move by a move from your
-        # simulation-based player
-        move = random.choice(moves)
+        move = self.choose_simulation_move(self.game, moves)
         self.game.play(move)
         print(move)
         return True
@@ -521,8 +540,7 @@ class CommandInterface:
         simulation = game.copy()
 
         while not simulation.game_over():
-            moves = simulation.legal_moves()
-            move = random.choice(moves)
+            move = self.choose_policy_move(simulation)
             simulation.play(move)
 
         winner = simulation.winner()
@@ -550,7 +568,46 @@ class CommandInterface:
         return True
 
     def cmd_numsimulations(self, args: str) -> bool:
-        return not_yet()
+        num_simulations = parse_numsimulations(args)
+        if num_simulations is None:
+            print_error("invalid number of simulations: {}".format(args))
+            return False
+        self.num_simulations = num_simulations
+        return True
+
+    def evaluate_move(self, game: HeapGo, move: int) -> float:
+        """
+        Evaluates a move by simulating it and then counting the # wins required for specified number of simulations
+        Win rate for the player to move is calculated
+        """
+        player = game.toplay
+        taken, gained = game.play_move(move)
+        # Count the number of wins for player to move after simulating the game for the specified number of simulations
+        wins = self.count_simulation_wins(game, player, self.num_simulations)
+        game.undo_move(move, taken, gained)
+
+        return wins / self.num_simulations
+
+    def choose_simulation_move(self, game: HeapGo, moves: List[int]) -> int:
+        """
+        Flat Monte Carlo implementation that plays the move with the highest simulated # of wins
+        Tie breaker is randomised
+        """
+        best_win_rate = -1.0
+        best_moves: List[int] = []
+
+        # Evaluate each move and keep track of the move with the best win rate
+        for move in moves:
+            win_rate = self.evaluate_move(game, move)
+
+            # Update the best win rate and best moves list based on the current move's win rate
+            if win_rate > best_win_rate:
+                best_win_rate = win_rate
+                best_moves = [move]
+            elif win_rate == best_win_rate:
+                best_moves.append(move)
+
+        return random.choice(best_moves)
 
     def cmd_policy(self, args: str) -> bool:
         if args == "random" or args == "probabilistic":
