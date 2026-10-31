@@ -1,0 +1,18 @@
+Script started on 2026-10-30 19:49:12-06:00 [TERM="xterm-256color" TTY="/dev/pts/7" COLUMNS="131" LINES="7"]
+yifeng15@ohaton:~/cmput455_a3>hostname
+ohaton
+yifeng15@ohaton:~/cmput455_a3>python3 a3test.py a3.py assignment3-public-tests.txt
+[34mSummary report:
+[0m161 tests performed
+[32m161 / 161 output statuses matched.
+[0m[32m161 / 161 command outputs matched.
+[0m[32m0 / 161 tests timed out.
+[0m[34mMarks report
+[0m59 / 59 marked tests passed.
+Public test mark: 1.00 / 1 mark (20.0% of the 5 marks for this assignment).
+
+Finished after 0.8 seconds.
+yifeng15@ohaton:~/cmput455_a3>exit
+exit
+
+Script done on 2026-10-30 19:49:26-06:00 [COMMAND_EXIT_CODE="0"]
