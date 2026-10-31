@@ -5,12 +5,13 @@ Private tests from claude
 
 import contextlib
 import io
+import random
 import sys
 import time
 
 sys.dont_write_bytecode = True 
 
-from a3 import CommandInterface
+from a3 import COLORS, CommandInterface
 
 TIME_LIMIT = 1.0  # seconds per command, as in a3test.py
 SAMPLES = 20000
@@ -133,18 +134,27 @@ def test_policymoves_output() -> None:
     check("policymoves at the end of the game prints nothing", success and output == "")
 
 
+def sample_playout_move(interface: CommandInterface) -> int:
+    """One move chosen by the policy the playouts use, from the current game."""
+    game = interface.game
+    interface.solver.prepare(game)
+    sizes = [len(heap) for heap in game.heaps]
+    gain = interface.solver.gain[COLORS.index(game.toplay)]
+    return interface.choose_playout_move(game.legal_moves(), sizes, gain)
+
+
 def test_policy_frequencies() -> None:
     interface = new_interface("0.5", "[[('b',5),('w',3)],[('w',9)],[('b',2)]]", "probabilistic")
     expected = interface.move_probabilities(interface.game)
     counts = {move: 0 for move in expected}
     for _ in range(SAMPLES):
-        counts[interface.choose_policy_move(interface.game, interface.game.legal_moves())] += 1
+        counts[sample_playout_move(interface)] += 1
     check("probabilistic playout moves follow the weights",
           all(abs(counts[move] / SAMPLES - expected[move]) < TOLERANCE for move in expected))
     interface.cmd_policy("random")
     counts = {move: 0 for move in expected}
     for _ in range(SAMPLES):
-        counts[interface.choose_policy_move(interface.game, interface.game.legal_moves())] += 1
+        counts[sample_playout_move(interface)] += 1
     check("random playout moves are uniform",
           all(abs(counts[move] / SAMPLES - 1 / 3) < TOLERANCE for move in expected))
 
@@ -160,6 +170,44 @@ def test_simulation_respects_policy() -> None:
         rates[policy] = wins / (SAMPLES // 4)
     check("simulate follows the policy (random about 0.50, probabilistic about 0.95)",
           abs(rates["random"] - 0.5) < 0.05 and abs(rates["probabilistic"] - 20 / 21) < 0.05)
+
+
+def reference_playout(interface: CommandInterface, game) -> str:
+    """Slow playout on the real game rules, to compare the fast one against."""
+    simulation = game.copy()
+    while not simulation.game_over():
+        moves = simulation.legal_moves()
+        if interface.policy == "random":
+            move = random.choice(moves)
+        else:
+            weights = [interface.move_weight(simulation, move) for move in moves]
+            move = random.choices(moves, weights=weights, k=1)[0]
+        simulation.play(move)
+    return simulation.winner()
+
+
+def test_playout_matches_game_rules() -> None:
+    # With the same random seed both playouts make the same random calls,
+    # so they must pick the same moves and find the same winner.
+    generator = random.Random(455)
+    for policy in ("random", "probabilistic"):
+        matches = 0
+        trials = 300
+        for trial in range(trials):
+            heaps = [[(generator.choice("bw"), generator.randint(1, 20))
+                      for _ in range(generator.randint(1, 8))]
+                     for _ in range(generator.randint(1, 8))]
+            interface = new_interface(str(generator.randint(-5, 5) + 0.5), str(heaps), policy)
+            if generator.random() < 0.5:
+                interface.cmd_toplay("w")
+            interface.solver.prepare(interface.game)
+            random.seed(trial)
+            fast = interface.run_simulation(interface.game)
+            random.seed(trial)
+            slow = reference_playout(interface, interface.game)
+            matches += fast == slow
+        check("fast playout matches the game rules on {} random positions ({})".format(
+            trials, policy), matches == trials)
 
 
 def test_game_over_and_small_games() -> None:
@@ -192,6 +240,7 @@ if __name__ == "__main__":
     test_policymoves_output()
     test_policy_frequencies()
     test_simulation_respects_policy()
+    test_playout_matches_game_rules()
     test_game_over_and_small_games()
     test_timing()
     print("\n{} passed, {} failed".format(passed, failed))
