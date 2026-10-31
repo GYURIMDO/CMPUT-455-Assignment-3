@@ -538,10 +538,15 @@ class CommandInterface:
     def run_simulation(self, game: HeapGo) -> str:
         """Run one random playout without changing the supplied game."""
         simulation = game.copy()
+        # only the heap just played can become empty, so keep the list of
+        # legal moves up to date instead of scanning all heaps every move
+        moves = simulation.legal_moves()
 
-        while not simulation.game_over():
-            move = self.choose_policy_move(simulation)
-            simulation.play(move)
+        while moves:
+            move = self.choose_policy_move(simulation, moves)
+            simulation.play_move(move)
+            if not simulation.heaps[move]:
+                moves.remove(move)
 
         winner = simulation.winner()
         assert winner is not None
@@ -693,9 +698,7 @@ class CommandInterface:
         print(" ".join(result))
         return True
             
-    def choose_policy_move(self, game):
-        moves = game.legal_moves()
-
+    def choose_policy_move(self, game, moves):
         if self.policy == "random":
             return random.choice(moves)
 

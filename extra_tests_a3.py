@@ -138,13 +138,13 @@ def test_policy_frequencies() -> None:
     expected = interface.move_probabilities(interface.game)
     counts = {move: 0 for move in expected}
     for _ in range(SAMPLES):
-        counts[interface.choose_policy_move(interface.game)] += 1
+        counts[interface.choose_policy_move(interface.game, interface.game.legal_moves())] += 1
     check("probabilistic playout moves follow the weights",
           all(abs(counts[move] / SAMPLES - expected[move]) < TOLERANCE for move in expected))
     interface.cmd_policy("random")
     counts = {move: 0 for move in expected}
     for _ in range(SAMPLES):
-        counts[interface.choose_policy_move(interface.game)] += 1
+        counts[interface.choose_policy_move(interface.game, interface.game.legal_moves())] += 1
     check("random playout moves are uniform",
           all(abs(counts[move] / SAMPLES - 1 / 3) < TOLERANCE for move in expected))
 
